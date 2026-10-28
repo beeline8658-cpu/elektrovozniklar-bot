@@ -295,7 +295,42 @@ async def run_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=menu
     )
 
+async def paid_feature(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+    now = datetime.utcnow()
 
+    with SessionLocal() as db:
+        user = db.query(User).filter_by(
+            telegram_id=telegram_id
+        ).first()
+
+        if not user:
+            await update.message.reply_text(
+                "Аввал /start орқали рўйхатдан ўтинг."
+            )
+            return
+
+        sub = (
+            db.query(Subscription)
+            .filter(
+                Subscription.user_id == user.id,
+                Subscription.ends_at > now,
+            )
+            .first()
+        )
+
+        if not sub:
+            await update.message.reply_text(
+                "🔒 Ушбу функциядан фойдаланиш учун "
+                "фаол обуна талаб қилинади.\n\n"
+                "💰 Ойлик обуна: 50 000 сўм",
+                reply_markup=MAIN_MENU,
+            )
+            return
+
+        await update.message.reply_text(
+            "✅ Обунангиз фаол!"
+        )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
