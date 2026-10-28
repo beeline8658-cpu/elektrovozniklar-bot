@@ -1,0 +1,29 @@
+
+async def start(update, context):
+    await update.message.reply_text(
+        "🚆 Assalomu alaykum!\n"
+        "Elektrovozniklar botiga xush kelibsiz!\n\n"
+        "/help — Yordam"
+    )
+
+async def help_command(update, context):
+    await update.message.reply_text(
+        "📋 BOT BUYRUQLARI\n\n"
+        "/start — Botni boshlash\n"
+        "/help — Yordam\n\n"
+        "Tez orada elektrovozlar va "
+        "texnik ma'lumotlar qo'shiladi!"
+    )
+
+from telegram.ext import (
+    Application,
+    CommandHandler,
+)
+
+TOKEN = "BU_YERGA_BOT_TOKENI"
+
+app = Application.builder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("help", help_command))
+
+app.run_polling()
