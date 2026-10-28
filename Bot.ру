@@ -241,6 +241,7 @@ async def subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message, reply_markup=MAIN_MENU)
 
 
+
 async def run_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with SessionLocal() as db:
         user = db.query(User).filter_by(
@@ -248,7 +249,9 @@ async def run_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ).first()
 
         if not user:
-            await update.message.reply_text("Avval /start bosing.")
+            await update.message.reply_text(
+                "Аввал /start орқали рўйхатдан ўтинг."
+            )
             return
 
         sub = (
@@ -258,21 +261,32 @@ async def run_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
             .first()
         )
 
-        if not sub or sub.ends_at <= datetime.utcnow():
-            await update.message.reply_text(
-                "🔒 Dastur bo'limlari uchun faol obuna kerak.\n\n"
-                "Oylik obuna: 50 000 so'm\n"
-                "To'lov integratsiyasi keyingi bosqichda qo'shiladi.",
-                reply_markup=MAIN_MENU,
-            )
-            return
-
-        await update.message.reply_text(
-            "🚆 ELEKTROVOZLAR BO'LIMI\n\n"
-            "Elektrovoz turlari va texnik ma'lumotlar "
-            "keyingi bosqichda qo'shiladi.",
-            reply_markup=MAIN_MENU,
+        active = bool(
+            sub and sub.ends_at > datetime.utcnow()
         )
+
+    menu = ReplyKeyboardMarkup(
+        [
+            ["🚂 Электровозлар рўйхати"],
+            ["📘 Бепул маълумотлар"],
+            ["🔒 Тўлиқ техник маълумотлар"],
+            ["🗺 Харита ва пикетлар"],
+            ["🛑 Тормоз синовлари"],
+            ["⬅️ Асосий меню"],
+        ],
+        resize_keyboard=True
+    )
+
+    await update.message.reply_text(
+        "🚂 ЭЛЕКТРОВОЗНИКЛАР БЎЛИМИ\n\n"
+        "📘 Бепул бўлимлардан фойдаланишингиз мумкин.\n"
+        "🔒 Техник маълумотлар, харита ва тормоз "
+        "синовлари учун фаол обуна талаб қилинади.\n\n"
+        f"Обуна ҳолати: {'✅ Фаол' if active else '❌ Фаол эмас'}\n"
+        "Ойлик тариф: 50 000 сўм",
+        reply_markup=menu
+    )
+
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
