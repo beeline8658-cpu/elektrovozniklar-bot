@@ -1,48 +1,332 @@
 
 import os
 import logging
-from telegram import Update
+from datetime import datetime
+
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
+    MessageHandler,
+    ConversationHandler,
     ContextTypes,
+    filters,
 )
 
+from database import init_db, SessionLocal, User, Wallet, Subscription
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+NAME, ROLE = range(2)
+
+MAIN_MENU = ReplyKeyboardMarkup(
+    [
+        ["👤 Profilim", "💰 Balansim"],
+        ["📅 Obunam", "🚆 Dasturni ishga tushirish"],
+    ],
+    resize_keyboard=True,
+)
+
+ROLE_MENU = ReplyKeyboardMarkup(
+    [
+        ["🚆 Mashinist"],
+        ["🛠 Mashinist yordamchisi"],
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=True,
+)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_id = update.effective_user.id
+
+    with SessionLocal() as db:
+        user = db.query(User).filter_by(
+            telegram_id=telegram_id
+        ).first()
+
+        if user:
+            await update.message.reply_text(
+                f"🚆 Xush kelibsiz, {user.name}!\n"
+                "Shaxsiy kabinetingizga xush kelibsiz.",
+                reply_markup=MAIN_MENU,
+            )
+            return ConversationHandler.END
+
     await update.message.reply_text(
-        "🚆 Assalomu alaykum!\n"
-        "Elektrovozniklar botiga xush kelibsiz!\n\n"
-        "/help — Yordam"
+        "🚆 Assalomu alaykum!\n\n"
+        "Elektrovozniklar botiga xush kelibsiz!\n"
+        "Ro'yxatdan o'tish uchun ismingizni yozing:",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("❌ Bekor qilish")]],
+            resize_keyboard=True,
+        ),
     )
+    return NAME
 
-async def help_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+
+async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text.strip()
+
+    if name == "❌ Bekor qilish":
+        await update.message.reply_text("Ro'yxatdan o'tish bekor qilindi.")
+        return ConversationHandler.END
+
+    if not name or len(name) > 100:
+        await update.message.reply_text(
+            "Iltimos, ismingizni to'g'ri kiriting."
+        )
+        return NAME
+
+    context.user_data["name"] = name
+
     await update.message.reply_text(
-        "📋 BOT BUYRUQLARI\n\n"
-        "/start — Botni boshlash\n"
+        f"Rahmat, {name}!\n\nKasbingizni tanlang:",
+        reply_markup=ROLE_MENU,
+    )
+    return ROLE
+
+
+async def get_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    role_text = update.message.text
+
+    roles = {
+        "🚆 Mashinist": "mashinist",
+        "🛠 Mashinist yordamchisi": "mashinist_yordamchisi",
+    }
+
+    if role_text not in roles:
+        await update.message.reply_text(
+            "Iltimos, tugmalardan birini tanlang:",
+            reply_markup=ROLE_MENU,
+        )
+        return ROLE
+
+    telegram_id = update.effective_user.id
+
+    try:
+        with SessionLocal() as db:
+            existing = db.query(User).filter_by(
+                telegram_id=telegram_id
+            ).first()
+
+            if existing:
+                await update.message.reply_text(
+                    "Siz avval ro'yxatdan o'tgansiz.",
+                    reply_markup=MAIN_MENU,
+                )
+                return ConversationHandler.END
+
+            user = User(
+                telegram_id=telegram_id,
+                name=context.user_data["name"],
+                role=roles[role_text],
+            )
+            db.add(user)
+            db.flush()
+
+            db.add(Wallet(user_id=user.id, balance=0))
+            db.commit()
+
+        await update.message.reply_text(
+            "✅ Ro'yxatdan muvaffaqiyatli o'tdingiz!\n\n"
+            f"👤 Ism: {context.user_data['name']}\n"
+            f"🧑‍✈️ Kasb: {role_text}\n"
+            "💰 Balans: 0 so'm\n\n"
+            "Kerakli bo'limni tanlang.",
+            reply_markup=MAIN_MENU,
+        )
+
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    except Exception:
+        logger.exception("Registration error")
+        await update.message.reply_text(
+            "Xatolik yuz berdi. Keyinroq qayta urinib ko'ring."
+        )
+        return ConversationHandler.END
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text(
+        "Ro'yxatdan o'tish bekor qilindi.",
+        reply_markup=MAIN_MENU,
+    )
+    return ConversationHandler.END
+
+
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with SessionLocal() as db:
+        user = db.query(User).filter_by(
+            telegram_id=update.effective_user.id
+        ).first()
+
+        if not user:
+            await update.message.reply_text("Avval /start bosing.")
+            return
+
+        role = {
+            "mashinist": "Mashinist",
+            "mashinist_yordamchisi": "Mashinist yordamchisi",
+        }.get(user.role, user.role)
+
+        await update.message.reply_text(
+            f"👤 SHAXSIY PROFIL\n\n"
+            f"Ism: {user.name}\n"
+            f"Kasb: {role}\n"
+            f"Telegram ID: {user.telegram_id}",
+            reply_markup=MAIN_MENU,
+        )
+
+
+async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with SessionLocal() as db:
+        user = db.query(User).filter_by(
+            telegram_id=update.effective_user.id
+        ).first()
+
+        if not user or not user.wallet:
+            await update.message.reply_text(
+                "Avval /start orqali ro'yxatdan o'ting."
+            )
+            return
+
+        await update.message.reply_text(
+            f"💰 HAMYONINGIZ\n\n"
+            f"Balans: {user.wallet.balance:,.0f} so'm\n\n"
+            "Oylik obuna: 50 000 so'm\n"
+            "Onlayn to'lov tizimi hali ulanmagan.",
+            reply_markup=MAIN_MENU,
+        )
+
+
+async def subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.utcnow()
+
+    with SessionLocal() as db:
+        user = db.query(User).filter_by(
+            telegram_id=update.effective_user.id
+        ).first()
+
+        if not user:
+            await update.message.reply_text("Avval /start bosing.")
+            return
+
+        sub = (
+            db.query(Subscription)
+            .filter_by(user_id=user.id, status="active")
+            .order_by(Subscription.ends_at.desc())
+            .first()
+        )
+
+        if sub and sub.ends_at > now:
+            message = (
+                "✅ Obunangiz faol.\n"
+                f"Tugash sanasi: {sub.ends_at:%d.%m.%Y %H:%M}"
+            )
+        else:
+            message = (
+                "📅 Faol obuna topilmadi.\n"
+                "Oylik tarif: 50 000 so'm\n"
+                "To'lov tizimi hali ulanmagan."
+            )
+
+        await update.message.reply_text(message, reply_markup=MAIN_MENU)
+
+
+async def run_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with SessionLocal() as db:
+        user = db.query(User).filter_by(
+            telegram_id=update.effective_user.id
+        ).first()
+
+        if not user:
+            await update.message.reply_text("Avval /start bosing.")
+            return
+
+        sub = (
+            db.query(Subscription)
+            .filter_by(user_id=user.id, status="active")
+            .order_by(Subscription.ends_at.desc())
+            .first()
+        )
+
+        if not sub or sub.ends_at <= datetime.utcnow():
+            await update.message.reply_text(
+                "🔒 Dastur bo'limlari uchun faol obuna kerak.\n\n"
+                "Oylik obuna: 50 000 so'm\n"
+                "To'lov integratsiyasi keyingi bosqichda qo'shiladi.",
+                reply_markup=MAIN_MENU,
+            )
+            return
+
+        await update.message.reply_text(
+            "🚆 ELEKTROVOZLAR BO'LIMI\n\n"
+            "Elektrovoz turlari va texnik ma'lumotlar "
+            "keyingi bosqichda qo'shiladi.",
+            reply_markup=MAIN_MENU,
+        )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📋 YORDAM\n\n"
+        "/start — Boshlash\n"
         "/help — Yordam\n\n"
-        "Elektrovozlar va texnik ma'lumotlar "
-        "tez orada qo'shiladi!"
+        "Savollar bo'yicha administratorga murojaat qiling."
     )
+
 
 def main():
-    token = os.environ.get("BOT_TOKEN")
+    token = os.getenv("BOT_TOKEN")
     if not token:
-        raise RuntimeError("BOT_TOKEN sozlanmagan!")
+        raise RuntimeError("BOT_TOKEN maxfiy o'zgaruvchisi sozlanmagan.")
+
+    init_db()
 
     app = Application.builder().token(token).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
 
-    logging.info("Elektrovozniklar bot ishga tushdi")
+    registration = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            ROLE: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, get_role
+                )
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app.add_handler(registration)
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(
+        MessageHandler(filters.Regex("^👤 Profilim$"), profile)
+    )
+    app.add_handler(
+        MessageHandler(filters.Regex("^💰 Balansim$"), balance)
+    )
+    app.add_handler(
+        MessageHandler(filters.Regex("^📅 Obunam$"), subscription)
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.Regex("^🚆 Dasturni ishga tushirish$"),
+            run_program,
+        )
+    )
+
+    logger.info("Elektrovozniklar bot ishga tushmoqda.")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
