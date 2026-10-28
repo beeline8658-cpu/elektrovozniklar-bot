@@ -380,6 +380,14 @@ def main():
             run_program,
         )
     )
+    app.add_handler(
+        MessageHandler(
+            filters.Regex(
+                r"^(🔒 Тўлиқ техник маълумотлар|🗺️ Харита ва пикетлар|🛑 Тормоз синовлари)"
+            ),
+            paid_feature,
+        )
+    )
 
     logger.info("Elektrovozniklar bot ishga tushmoqda.")
     app.run_polling()
