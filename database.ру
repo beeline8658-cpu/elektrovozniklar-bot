@@ -1,0 +1,91 @@
+
+import os
+from datetime import datetime
+
+from sqlalchemy import (
+    create_engine,
+    String,
+    Integer,
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Numeric,
+)
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///elektrovozniklar.db")
+
+engine_options = {}
+if DATABASE_URL.startswith("sqlite"):
+    engine_options["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, **engine_options)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(
+        BigInteger, unique=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
+
+    wallet = relationship(
+        "Wallet", back_populates="user", uselist=False,
+        cascade="all, delete-orphan"
+    )
+    subscriptions = relationship(
+        "Subscription", back_populates="user"
+    )
+
+
+class Wallet(Base):
+    __tablename__ = "wallets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), unique=True
+    )
+    balance: Mapped[float] = mapped_column(
+        Numeric(12, 2), default=0
+    )
+
+    user = relationship("User", back_populates="wallet")
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    starts_at: Mapped[datetime] = mapped_column(DateTime)
+    ends_at: Mapped[datetime] = mapped_column(DateTime)
+    status: Mapped[str] = mapped_column(String(20), default="inactive")
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), default=50000)
+
+    user = relationship("User", back_populates="subscriptions")
+
+
+def init_db():
+    Base.metadata.create_all(engine)
+
+
+if __name__ == "__main__":
+    init_db()
+    print("Ma'lumotlar bazasi jadvallari tayyor.")
